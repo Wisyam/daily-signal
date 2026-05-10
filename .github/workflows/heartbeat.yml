@@ -61,7 +61,7 @@ jobs:
           fi
           git config user.name "daily-signal-bot"
           git config user.email "151379934+Wisyam@users.noreply.github.com"
-          git add logs/ .daily-signal/config.yml
+          git add logs/ .daily-signal/config.yml runtime_target/summary.json
           if git diff --cached --quiet; then
             echo "No local changes"
             exit 0
@@ -106,16 +106,64 @@ jobs:
           git commit -m "chore(signal): ${MODE} ${SLOT}"
           git push origin "$TARGET_BRANCH"
 
+      - name: Prepare notification payload
+        if: always()
+        shell: bash
+        run: |
+          python - << 'PY'
+          import json, os
+          from pathlib import Path
+
+          summary = {}
+          p = Path('runtime_target/summary.json')
+          if p.exists():
+              summary = json.loads(p.read_text(encoding='utf-8'))
+
+          status = os.getenv('JOB_STATUS', 'unknown')
+          repo = os.getenv('GITHUB_REPOSITORY', '')
+          run_id = os.getenv('GITHUB_RUN_ID', '')
+          run_url = f'https://github.com/{repo}/actions/runs/{run_id}'
+
+          fields = [
+            {"name":"Status","value":status,"inline":True},
+            {"name":"Repo","value":repo or '-',"inline":True},
+            {"name":"Run Mode","value":str(summary.get('run_mode','-')),"inline":True},
+            {"name":"Target Mode","value":str(summary.get('target_mode','-')),"inline":True},
+            {"name":"Target Repo","value":str(summary.get('target_repo','-')),"inline":True},
+            {"name":"Target Branch","value":str(summary.get('target_branch','-')),"inline":True},
+            {"name":"Slot","value":str(summary.get('slot','-')),"inline":True},
+            {"name":"Skipped","value":str(summary.get('skipped',False)),"inline":True},
+            {"name":"Skip Reason","value":str(summary.get('skip_reason','-') or '-'),"inline":False},
+            {"name":"Actions","value":"\n".join(summary.get('actions',[])[:20]) or '-',"inline":False},
+            {"name":"Files Generated","value":"\n".join(summary.get('files_generated',[])[:20]) or '-',"inline":False},
+            {"name":"Run URL","value":run_url,"inline":False}
+          ]
+
+          color = 3066993 if status == 'success' else 15158332
+          payload = {
+            "embeds": [{
+              "title": "Daily Signal Report",
+              "description": "Automated heartbeat execution result",
+              "color": color,
+              "fields": fields
+            }]
+          }
+          Path('runtime_target/notify-discord.json').write_text(json.dumps(payload), encoding='utf-8')
+          PY
+        env:
+          JOB_STATUS: ${{ job.status }}
+
+      - name: Notify Discord (success/failure)
+        if: always() && env.DISCORD_WEBHOOK_URL != ''
+        shell: bash
+        run: |
+          curl -sS -H "Content-Type: application/json" \
+            --data @runtime_target/notify-discord.json \
+            "${DISCORD_WEBHOOK_URL}" >/dev/null
+
       - name: Notify Telegram on failure (optional)
         if: ${{ failure() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         run: |
           MSG="❌ Daily Signal failed on $GITHUB_REPOSITORY run $GITHUB_RUN_ID"
           curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" -d text="$MSG" >/dev/null
-
-      - name: Notify Discord on failure (optional)
-        if: ${{ failure() && env.DISCORD_WEBHOOK_URL != '' }}
-        run: |
-          MSG="❌ Daily Signal failed on $GITHUB_REPOSITORY run $GITHUB_RUN_ID"
-          curl -sS -H "Content-Type: application/json" \
-            -d "{\"content\":\"$MSG\"}" "${DISCORD_WEBHOOK_URL}" >/dev/null
