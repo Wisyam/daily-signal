@@ -43,3 +43,10 @@ Key controls:
 - `logs/daily/YYYY-MM.md`
 - `logs/weekly/YYYY-WW.md`
 - `logs/meta/status.json`
+
+## Cross-Repo Target
+
+- Set .daily-signal/config.yml > 	arget.mode to profile or custom.
+- For custom, set 	arget.repo to owner/repo.
+- Add TARGET_REPO_TOKEN secret (fine-grained, contents:write on target repo).
+- Automation writes logs into target repo logs/ directory.
