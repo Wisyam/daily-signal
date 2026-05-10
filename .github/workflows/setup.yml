@@ -1,0 +1,70 @@
+name: Setup Wizard
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_mode:
+        description: "Target mode"
+        required: true
+        default: "self"
+        type: choice
+        options: [self, profile, custom]
+      target_repo:
+        description: "owner/repo (required for custom, optional profile)"
+        required: false
+        type: string
+      timezone:
+        description: "IANA timezone"
+        required: true
+        default: "Asia/Jakarta"
+        type: string
+      commits_per_day:
+        description: "Max commits per day"
+        required: true
+        default: "3"
+        type: choice
+        options: ["1", "2", "3"]
+      weekend_mode:
+        description: "Enable weekend throttle"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Apply setup config
+        run: |
+          python scripts/setup.py \
+            --target-mode "${{ inputs.target_mode }}" \
+            --target-repo "${{ inputs.target_repo }}" \
+            --timezone "${{ inputs.timezone }}" \
+            --commits-per-day "${{ inputs.commits_per_day }}" \
+            --weekend-mode "${{ inputs.weekend_mode }}"
+
+      - name: Commit setup changes
+        run: |
+          git config user.name "daily-signal-bot"
+          git config user.email "151379934+Wisyam@users.noreply.github.com"
+          git add .daily-signal/config.yml
+          if git diff --cached --quiet; then
+            echo "No changes."
+            exit 0
+          fi
+          git commit -m "chore(setup): apply setup wizard configuration"
+          git push
+
+      - name: Secret checklist
+        run: |
+          echo "If using cross-repo target, set secret TARGET_REPO_TOKEN"
+          echo "Optional alerts: DISCORD_WEBHOOK_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID"
