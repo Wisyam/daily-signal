@@ -8,7 +8,10 @@ on:
         required: true
         default: "self"
         type: choice
-        options: [self, profile, custom]
+        options:
+          - self
+          - profile
+          - custom
       target_repo:
         description: "owner/repo (required for custom, optional profile)"
         required: false
@@ -23,7 +26,10 @@ on:
         required: true
         default: "3"
         type: choice
-        options: ["1", "2", "3"]
+        options:
+          - "1"
+          - "2"
+          - "3"
       weekend_mode:
         description: "Enable weekend throttle"
         required: true
@@ -41,7 +47,11 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"`n`n      - name: Install deps`n        run: pip install pyyaml`n
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install pyyaml
+
       - name: Apply setup config
         run: |
           python scripts/setup.py \
