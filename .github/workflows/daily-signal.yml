@@ -2,8 +2,8 @@ name: Daily Signal
 
 on:
   schedule:
-    # 09:10 WIB = 02:10 UTC
-    - cron: "10 2 * * *"
+    # Runs every day at 02:00 UTC (09:00 WIB), then waits random 0-30 minutes.
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 permissions:
@@ -21,17 +21,46 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Wait random delay (0-30 min)
+        shell: bash
+        run: |
+          DELAY_MIN=$((RANDOM % 31))
+          echo "Random delay: ${DELAY_MIN} minute(s)"
+          sleep "$((DELAY_MIN * 60))"
+
       - name: Generate daily signal entry
         run: python scripts/heartbeat.py
 
       - name: Commit and push if changed
+        id: commit_step
+        shell: bash
         run: |
           git config user.name "daily-signal-bot"
           git config user.email "151379934+Wisyam@users.noreply.github.com"
           git add signal/
           if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No changes to commit."
             exit 0
           fi
           git commit -m "chore(signal): daily heartbeat"
           git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Telegram on failure (optional)
+        if: failure() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != ''
+        shell: bash
+        run: |
+          MSG="❌ Daily Signal failed on $GITHUB_REPOSITORY at run $GITHUB_RUN_ID"
+          curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d text="$MSG" >/dev/null
+
+      - name: Notify Discord on failure (optional)
+        if: failure() && secrets.DISCORD_WEBHOOK_URL != ''
+        shell: bash
+        run: |
+          MSG="❌ Daily Signal failed on $GITHUB_REPOSITORY at run $GITHUB_RUN_ID"
+          curl -sS -H "Content-Type: application/json" \
+            -d "{\"content\":\"$MSG\"}" \
+            "${{ secrets.DISCORD_WEBHOOK_URL }}" >/dev/null
