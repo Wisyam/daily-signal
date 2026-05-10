@@ -63,8 +63,7 @@ def append_daily_log(base_dir, dt, slot):
     if f'[{slot}] {date_key}' in content:
         return False, 'duplicate-slot-entry'
     line = f'- [{slot}] {date_key} {dt:%H:%M} WIB | {random.choice(PULSE_LINES)}\n'
-    if 'Learned:' not in content or content.count(date_key) % 2 == 0:
-        line += f'  - {random.choice(LEARN_LINES)}\n'
+    line += f'  - {random.choice(LEARN_LINES)}\n'
     p.write_text(content + line, encoding='utf-8')
     return True, 'written'
 
@@ -93,18 +92,14 @@ def resolve_target(cfg):
     mode = cfg['target'].get('mode', 'self')
     branch = cfg['target'].get('branch', 'main')
     repo = cfg['target'].get('repo', '').strip()
-    current_repo = os.getenv('GITHUB_REPOSITORY_NAME', '').strip()
-    actor = os.getenv('GITHUB_ACTOR_NAME', '').strip()
+    current_repo = os.getenv('GITHUB_REPOSITORY', '').strip()
+    actor = os.getenv('GITHUB_ACTOR', '').strip()
 
     if mode == 'self':
-        if not current_repo:
-            raise RuntimeError('Cannot resolve self repo from GITHUB_REPOSITORY_NAME')
         return mode, current_repo, branch
     if mode == 'profile':
         if repo:
             return mode, repo, branch
-        if not actor:
-            raise RuntimeError('Cannot resolve profile repo from GITHUB_ACTOR_NAME')
         return mode, f'{actor}/{actor}', branch
     if mode == 'custom':
         if not repo:
@@ -147,7 +142,7 @@ def main():
     slot = detect_slot(dt.hour)
     (RUNTIME_DIR / 'slot.txt').write_text(slot, encoding='utf-8')
     random.seed(f"{dt:%Y-%m-%d}-{slot}")
-    time.sleep(random.randint(0, 30))
+    time.sleep(random.randint(0, 20))
 
     changed = False
     if args.mode in ('pulse', 'healthcheck') and cfg['modules'].get('pulse', True):
@@ -160,10 +155,7 @@ def main():
         changed = changed or ok
 
     if changed:
-        if status.get('last_attempt', '').startswith(f'{dt:%Y-%m-%d}'):
-            status['today_count'] = int(status.get('today_count', 0)) + 1
-        else:
-            status['today_count'] = 1
+        status['today_count'] = int(status.get('today_count', 0)) + 1
         status['last_success'] = dt.isoformat()
         status['consecutive_failures'] = 0
         status['last_slot'] = slot
