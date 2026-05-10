@@ -12,6 +12,10 @@ permissions:
 jobs:
   heartbeat:
     runs-on: ubuntu-latest
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,19 +52,19 @@ jobs:
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Notify Telegram on failure (optional)
-        if: failure() && secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != ''
+        if: ${{ failure() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         shell: bash
         run: |
           MSG="❌ Daily Signal failed on $GITHUB_REPOSITORY at run $GITHUB_RUN_ID"
-          curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
             -d text="$MSG" >/dev/null
 
       - name: Notify Discord on failure (optional)
-        if: failure() && secrets.DISCORD_WEBHOOK_URL != ''
+        if: ${{ failure() && env.DISCORD_WEBHOOK_URL != '' }}
         shell: bash
         run: |
           MSG="❌ Daily Signal failed on $GITHUB_REPOSITORY at run $GITHUB_RUN_ID"
           curl -sS -H "Content-Type: application/json" \
             -d "{\"content\":\"$MSG\"}" \
-            "${{ secrets.DISCORD_WEBHOOK_URL }}" >/dev/null
+            "${DISCORD_WEBHOOK_URL}" >/dev/null
