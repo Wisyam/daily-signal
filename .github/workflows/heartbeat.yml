@@ -2,188 +2,196 @@ name: Daily Signal
 
 on:
   schedule:
-    - cro n: "0 2 * * *"
+    - cron: "0 2 * * *"
     - cron: "0 7 * * *"
-    -  cron: "0 14 * * *"
+    - cron: "0 14 * * *"
   workflow_dispatch:
-    i nputs:
+    inputs:
       mode:
-        description: "Run  mode"
+        description: "Run mode"
         required: true
-        default:  pulse
+        default: pulse
         type: choice
-        options:  [pulse, summary, healthcheck]
-      force_run :
-        description: "Bypass non-security g uards"
+        options: [pulse, summary, healthcheck]
+      force_run:
+        description: "Bypass non-security guards"
         required: true
-        default : false
+        default: false
         type: boolean
 
 permissions:
-   contents: write
+  contents: write
 
 concurrency:
-  group: daily -signal-${{ github.ref }}
-  cancel-in-progres s: false
+  group: daily-signal-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   heartbeat:
-    runs-on: ubu ntu-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM _BOT_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ sec rets.TELEGRAM_CHAT_ID }}
-      DISCORD_WEBHOO K_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-       TARGET_REPO_TOKEN: ${{ secrets.TARGET_REPO _TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      TARGET_REPO_TOKEN: ${{ secrets.TARGET_REPO_TOKEN }}
     steps:
-      - uses: actions/ch eckout@v4
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python @v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: " 3.12"
+          python-version: "3.12"
 
       - name: Install deps
-        run : pip install pyyaml
+        run: pip install pyyaml
 
-      - name: Run engin e
+      - name: Run engine
         run: |
-          python scripts/run ner.py \
-            --mode "${{ inputs.mode  || 'pulse' }}" \
-            --force-run "${{  inputs.force_run || 'false' }}"
+          python scripts/runner.py \
+            --mode "${{ inputs.mode || 'pulse' }}" \
+            --force-run "${{ inputs.force_run || 'false' }}"
 
-      - nam e: Commit local changes (self mode)
-        s hell: bash
+      - name: Commit local changes (self mode)
+        shell: bash
         run: |
-          TARGET_MO DE=$(cat runtime_target/mode.txt)
-          i f [ "$TARGET_MODE" != "self" ]; then
-             echo "Target mode is $TARGET_MODE, skip l ocal commit"
+          TARGET_MODE=$(cat runtime_target/mode.txt)
+          if [ "$TARGET_MODE" != "self" ]; then
+            echo "Target mode is $TARGET_MODE, skip local commit"
             exit 0
           fi
-           git config user.name "daily-signal- bot"
-          git config user.email "1513799 34+Wisyam@users.noreply.github.com"
-           git add logs/ .daily-signal/config.yml runti me_target/summary.json
-          if git diff  --cached --quiet; then
-            echo "No l ocal changes"
+          git config user.name "daily-signal-bot"
+          git config user.email "151379934+Wisyam@users.noreply.github.com"
+          git add logs/ .daily-signal/config.yml runtime_target/summary.json
+          if git diff --cached --quiet; then
+            echo "No local changes"
             exit 0
-          fi 
-          SLOT=$(cat runtime_target/slot.txt )
-          MODE=$(cat runtime_target/run_mod e.txt)
-          git commit -m "chore(signal) : ${MODE} ${SLOT}"
+          fi
+          SLOT=$(cat runtime_target/slot.txt)
+          MODE=$(cat runtime_target/run_mode.txt)
+          git commit -m "chore(signal): ${MODE} ${SLOT}"
           git push
 
-       - name: Commit cross-repo changes (profile/cu stom)
+      - name: Commit cross-repo changes (profile/custom)
         shell: bash
         run: |
-           TARGET_REPO=$(cat runtime_target/repo.t xt)
-          TARGET_MODE=$(cat runtime_targe t/mode.txt)
-          TARGET_BRANCH=$(cat run time_target/branch.txt)
-          if [ "$TARG ET_MODE" = "self" ]; then
-            echo "S elf mode, skip cross-repo"
-            exit 0 
+          TARGET_REPO=$(cat runtime_target/repo.txt)
+          TARGET_MODE=$(cat runtime_target/mode.txt)
+          TARGET_BRANCH=$(cat runtime_target/branch.txt)
+          if [ "$TARGET_MODE" = "self" ]; then
+            echo "Self mode, skip cross-repo"
+            exit 0
           fi
-          if [ -z "$TARGET_REPO _TOKEN" ]; then
-            echo "TARGET_REPO _TOKEN missing; skip cross-repo safely"
-             exit 0
+          if [ -z "$TARGET_REPO_TOKEN" ]; then
+            echo "TARGET_REPO_TOKEN missing; skip cross-repo safely"
+            exit 0
           fi
 
-          rm -rf  target_repo
-          git clone "https://x-ac cess-token:${TARGET_REPO_TOKEN}@github.com/${ TARGET_REPO}.git" target_repo
-          cd ta rget_repo
-          git checkout "$TARGET_BRA NCH" || git checkout -b "$TARGET_BRANCH"
-           mkdir -p logs
-          cp -r ../runtim e_target/output/. logs/
+          rm -rf target_repo
+          git clone "https://x-access-token:${TARGET_REPO_TOKEN}@github.com/${TARGET_REPO}.git" target_repo
+          cd target_repo
+          git checkout "$TARGET_BRANCH" || git checkout -b "$TARGET_BRANCH"
+          mkdir -p logs
+          cp -r ../runtime_target/output/. logs/
 
-          git config  user.name "daily-signal-bot"
-          git c onfig user.email "151379934+Wisyam@users.nore ply.github.com"
+          git config user.name "daily-signal-bot"
+          git config user.email "151379934+Wisyam@users.noreply.github.com"
           git add logs/
-           if git diff --cached --quiet; then
-             echo "No cross-repo changes"
-             exit 0
+          if git diff --cached --quiet; then
+            echo "No cross-repo changes"
+            exit 0
           fi
-          SLOT=$(cat . ./runtime_target/slot.txt)
-          MODE=$(c at ../runtime_target/run_mode.txt)
-           git commit -m "chore(signal): ${MODE} ${SLOT} "
+          SLOT=$(cat ../runtime_target/slot.txt)
+          MODE=$(cat ../runtime_target/run_mode.txt)
+          git commit -m "chore(signal): ${MODE} ${SLOT}"
           git push origin "$TARGET_BRANCH"
- 
+
       - name: Prepare notification payload
-         if: always()
+        if: always()
         shell: bash
-         env:
-          JOB_STATUS: ${{ job.status  }}
+        env:
+          JOB_STATUS: ${{ job.status }}
         run: |
           python - << 'PY'
-           import json
+          import json
           import os
-           from pathlib import Path
+          from pathlib import Path
 
-          su mmary = {}
-          p = Path('runtime_target /summary.json')
+          summary = {}
+          p = Path('runtime_target/summary.json')
           if p.exists():
-               summary = json.loads(p.read_text(en coding='utf-8'))
+              summary = json.loads(p.read_text(encoding='utf-8'))
 
-          status = os.geten v('JOB_STATUS', 'unknown')
-          icon = ' ✅' if status == 'success' else '❌'
-           color = 5763719 if status == 'success' el se 15548997
+          status = os.getenv('JOB_STATUS', 'unknown')
+          icon = '✅' if status == 'success' else '❌'
+          color = 5763719 if status == 'success' else 15548997
 
-          repo = os.getenv('GITH UB_REPOSITORY', '')
-          run_id = os.get env('GITHUB_RUN_ID', '')
-          run_no = o s.getenv('GITHUB_RUN_NUMBER', '')
-          r un_url = f'https://github.com/{repo}/actions/ runs/{run_id}'
+          repo = os.getenv('GITHUB_REPOSITORY', '')
+          run_id = os.getenv('GITHUB_RUN_ID', '')
+          run_no = os.getenv('GITHUB_RUN_NUMBER', '')
+          run_url = f'https://github.com/{repo}/actions/runs/{run_id}'
 
-          tz_label = summary. get('timezone_label', summary.get('timezone',  'Local'))
+          tz_label = summary.get('timezone_label', summary.get('timezone', 'Local'))
           schedule_text = (
-             f"• Morning: 09:00 {tz_label} (02:00  UTC)\n"
-            f"• Afternoon: 14:00 { tz_label} (07:00 UTC)\n"
-            f"• N ight: 21:00 {tz_label} (14:00 UTC)"
-           )
+              f"• Morning: 09:00 {tz_label} (02:00 UTC)\n"
+              f"• Afternoon: 14:00 {tz_label} (07:00 UTC)\n"
+              f"• Night: 21:00 {tz_label} (14:00 UTC)"
+          )
 
-          actions = summary.get('actions' , [])
-          actions_text = '\n'.join([f" • {a}" for a in actions[:10]]) if actions e lse '• -'
+          actions = summary.get('actions', [])
+          actions_text = '\n'.join([f"• {a}" for a in actions[:10]]) if actions else '• -'
 
-          files = summary.get('f iles_generated', [])
-          files_text = ' \n'.join([f"• `{f.replace('runtime_target/ output/','logs/')}`" for f in files[:8]]) if  files else '• -'
+          files = summary.get('files_generated', [])
+          files_text = '\n'.join([f"• `{f.replace('runtime_target/output/','logs/')}`" for f in files[:8]]) if files else '• -'
 
-          skipped = summa ry.get('skipped', False)
-          skip_reaso n = summary.get('skip_reason', '') or '-'
+          skipped = summary.get('skipped', False)
+          skip_reason = summary.get('skip_reason', '') or '-'
 
-           fields = [
-            {"name":"📌  Execution","value":f"{icon} **{status.upper() }**\nMode: `{summary.get('run_mode','-')}`\\ nSlot: `{summary.get('slot','-')}`\nSkipped:  `{skipped}`", "inline":True},
-            {" name":"🎯 Target","value":f"Repo: `{summary .get('target_repo','-')}`\nBranch: `{summary .get('target_branch','-')}`\nMode: `{summary .get('target_mode','-')}`", "inline":True},
-             {"name":"🕒 Schedule Windows","v alue":schedule_text, "inline":False},
-             {"name":"🧠 Actions Performed","value" :actions_text, "inline":False},
-            { "name":"📄 Generated Files","value":files_t ext, "inline":False},
-            {"name":"� �️ Skip Reason","value":f"`{skip_reason}`",  "inline":False},
-            {"name":"🔗 R un Details","value":f"[Open workflow run]({ru n_url})\nRun #: `{run_no}`", "inline":False} 
+          fields = [
+              {
+                  "name": "📌 Execution",
+                  "value": f"{icon} **{status.upper()}**\nMode: `{summary.get('run_mode','-')}`\nSlot: `{summary.get('slot','-')}`\nSkipped: `{skipped}`",
+                  "inline": True
+              },
+              {
+                  "name": "🎯 Target",
+                  "value": f"Repo: `{summary.get('target_repo','-')}`\nBranch: `{summary.get('target_branch','-')}`\nMode: `{summary.get('target_mode','-')}`",
+                  "inline": True
+              },
+              {"name": "🕒 Schedule Windows", "value": schedule_text, "inline": False},
+              {"name": "🧠 Actions Performed", "value": actions_text, "inline": False},
+              {"name": "📄 Generated Files", "value": files_text, "inline": False},
+              {"name": "⚠️ Skip Reason", "value": f"`{skip_reason}`", "inline": False},
+              {"name": "🔗 Run Details", "value": f"[Open workflow run]({run_url})\nRun #: `{run_no}`", "inline": False}
           ]
 
           payload = {
-             "username": "Daily Signal Bot",
-             "avatar_url": "https://raw.githubuserconten t.com/github/explore/main/topics/github-actio ns/github-actions.png",
-            "embeds":  [{
-              "title": "Daily Signal —  Execution Report",
-              "description ": "Automated contribution heartbeat status a nd output summary.",
-              "color": c olor,
-              "fields": fields,
-               "footer": {"text": f"{repo} • daily- signal"}
-            }]
+              "username": "Daily Signal Bot",
+              "avatar_url": "https://raw.githubusercontent.com/github/explore/main/topics/github-actions/github-actions.png",
+              "embeds": [{
+                  "title": "Daily Signal — Execution Report",
+                  "description": "Automated contribution heartbeat status and output summary.",
+                  "color": color,
+                  "fields": fields,
+                  "footer": {"text": f"{repo} • daily-signal"}
+              }]
           }
 
-           Path('runtime_target').mkdir(parents=True,  exist_ok=True)
-          Path('runtime_target /notify-discord.json').write_text(json.dumps( payload), encoding='utf-8')
+          Path('runtime_target').mkdir(parents=True, exist_ok=True)
+          Path('runtime_target/notify-discord.json').write_text(json.dumps(payload), encoding='utf-8')
           PY
 
-       - name: Notify Discord (success/failure)
-         if: always() && env.DISCORD_WEBHOOK_UR L != ''
+      - name: Notify Discord (success/failure)
+        if: always() && env.DISCORD_WEBHOOK_URL != ''
         shell: bash
         run: |
-           curl -sS -H "Content-Type: applicatio n/json" \
-            --data @runtime_target/ notify-discord.json \
-            "${DISCORD_ WEBHOOK_URL}" >/dev/null
+          curl -sS -H "Content-Type: application/json" \
+            --data @runtime_target/notify-discord.json \
+            "${DISCORD_WEBHOOK_URL}" >/dev/null
 
-      - name: Notif y Telegram on failure (optional)
-        if:  ${{ failure() && env.TELEGRAM_BOT_TOKEN != ''  && env.TELEGRAM_CHAT_ID != '' }}
-        run : |
-          MSG="❌ Daily Signal failed on  $GITHUB_REPOSITORY run $GITHUB_RUN_ID"
-           curl -sS -X POST "https://api.telegram.o rg/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-             -d chat_id="${TELEGRAM_CHAT_ID}" \
-             -d text="$MSG" >/dev/null 
+      - name: Notify Telegram on failure (optional)
+        if: ${{ failure() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
+        run: |
+          MSG="❌ Daily Signal failed on $GITHUB_REPOSITORY run $GITHUB_RUN_ID"
+          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="$MSG" >/dev/null
