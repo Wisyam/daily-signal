@@ -1,37 +1,45 @@
 # daily-signal
 
-Automated daily heartbeat commits to keep contribution activity consistent with meaningful logs.
+Reusable automation template for meaningful contribution heartbeat.
 
-## What it does
+## Features
 
-- Runs every day at **09:00 WIB** base schedule (02:00 UTC) via GitHub Actions.
-- Adds a **random delay 0-30 minutes** to make commit timing more natural.
-- Appends one line per day to `signal/YYYY-MM.md`.
-- Commits only when there is a real content change.
+- Setup wizard (`workflow_dispatch`) for initial configuration.
+- 3 schedule windows/day with natural timing distribution.
+- Guardrails: max commits/day, weekend throttle, duplicate prevention.
+- Useful logs (daily + weekly digest), not dummy content.
+- Optional failure alerts to Discord/Telegram.
 
-## Files
+## Quick Start
 
-- `.github/workflows/daily-signal.yml` — schedule + random window + optional notifications
-- `scripts/heartbeat.py` — generates daily log entry
-- `signal/` — monthly heartbeat logs
+1. Use this repository as template (or fork).
+2. Run **Actions > Setup Wizard > Run workflow**.
+3. (Optional) Set secrets:
+   - `DISCORD_WEBHOOK_URL`
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_CHAT_ID`
+   - `TARGET_REPO_TOKEN` (only for cross-repo target)
+4. Let **Daily Signal** run on schedule or trigger manually.
 
-## Optional failure notifications
+## Workflows
 
-Set repository secrets if you want alerts:
+- `.github/workflows/setup.yml` — configure repo behavior.
+- `.github/workflows/heartbeat.yml` — core automation engine.
+- `.github/workflows/healthcheck.yml` — print latest status.
 
-### Telegram
+## Config
 
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
+Main config: `.daily-signal/config.yml`
 
-### Discord
+Key controls:
+- target mode (`self|profile|custom`)
+- timezone
+- commit/day caps
+- weekend throttle
+- modules on/off
 
-- `DISCORD_WEBHOOK_URL`
+## Output
 
-If secrets are not set, notification steps are automatically skipped.
-
-## Notes
-
-- You can trigger manually from **Actions > Daily Signal > Run workflow**.
-- To change base time, edit cron in `.github/workflows/daily-signal.yml`.
-- Format uses Asia/Jakarta timezone for the log content.
+- `logs/daily/YYYY-MM.md`
+- `logs/weekly/YYYY-WW.md`
+- `logs/meta/status.json`
