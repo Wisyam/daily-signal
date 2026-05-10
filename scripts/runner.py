@@ -4,7 +4,7 @@ import os
 import random
 import shutil
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import yaml
@@ -37,13 +37,9 @@ def load_status():
         return {"last_success":"","last_attempt":"","today_count":0,"last_slot":"","last_reason":"init","consecutive_failures":0}
     return json.loads(STATUS_PATH.read_text(encoding='utf-8'))
 
-def save_status(path, data):
+def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding='utf-8')
-
-def save_summary(data):
-    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    SUMMARY_PATH.write_text(json.dumps(data, indent=2), encoding='utf-8')
 
 def now_tz(tz):
     return datetime.now(ZoneInfo(tz))
@@ -51,36 +47,23 @@ def now_tz(tz):
 def is_weekend(dt):
     return dt.weekday() >= 5
 
-def detect_slot(hour):
-    if 8 <= hour <= 11:
-        return 'morning'
-    if 12 <= hour <= 17:
-        return 'afternoon'
-    return 'night'
+def parse_utc_hhmm(base_utc):
+    h, m = base_utc.split(':')
+    return int(h), int(m)
 
-def append_daily_log(base_dir, dt, slot):
-    p = base_dir / f'daily/{dt:%Y-%m}.md'
-    p.parent.mkdir(parents=True, exist_ok=True)
-    if not p.exists():
-        p.write_text(f'# Daily Logs {dt:%Y-%m}\n\n', encoding='utf-8')
-    content = p.read_text(encoding='utf-8')
-    date_key = f'{dt:%Y-%m-%d}'
-    if f'[{slot}] {date_key}' in content:
-        return False, 'duplicate-slot-entry', None
-    line = f'- [{slot}] {date_key} {dt:%H:%M} WIB | {random.choice(PULSE_LINES)}\n'
-    line += f'  - {random.choice(LEARN_LINES)}\n'
-    p.write_text(content + line, encoding='utf-8')
-    return True, 'written', str(p)
-
-def append_weekly_digest(base_dir, dt):
-    week = dt.isocalendar().week
-    p = base_dir / f'weekly/{dt:%Y}-W{week:02d}.md'
-    p.parent.mkdir(parents=True, exist_ok=True)
-    if p.exists():
-        return False, 'weekly-exists', None
-    text = f"# Weekly Digest {dt:%Y}-W{week:02d}\n\n- Focus: delivery consistency\n- Reliability: automation healthy\n- Next: improve quality signals\n"
-    p.write_text(text, encoding='utf-8')
-    return True, 'weekly-written', str(p)
+def detect_slot_by_config(dt_utc, slots):
+    # Pick nearest configured slot to current UTC minute
+    now_min = dt_utc.hour * 60 + dt_utc.minute
+    best = None
+    best_diff = 10**9
+    for slot in slots:
+        h, m = parse_utc_hhmm(slot['base_utc'])
+        slot_min = h * 60 + m
+        diff = min(abs(now_min - slot_min), 1440 - abs(now_min - slot_min))
+        if diff < best_diff:
+            best_diff = diff
+            best = slot
+    return best or slots[0]
 
 def should_skip(cfg, status, dt, force):
     if force:
@@ -88,9 +71,25 @@ def should_skip(cfg, status, dt, force):
     max_day = cfg['policy']['max_commits_per_day']
     if cfg['policy'].get('weekend_mode', True) and is_weekend(dt):
         max_day = min(max_day, cfg['policy'].get('weekend_max_commits', 1))
+
     last_attempt = status.get('last_attempt', '')
-    if last_attempt.startswith(f'{dt:%Y-%m-%d}') and status.get('today_count', 0) >= max_day:
+    today = f'{dt:%Y-%m-%d}'
+    if not last_attempt.startswith(today):
+        status['today_count'] = 0
+
+    if int(status.get('today_count', 0)) >= max_day:
         return True, 'max-commits-reached'
+
+    # min gap guard
+    gap_hours = int(cfg['policy'].get('min_gap_hours', 0))
+    last_success = status.get('last_success', '')
+    if last_success and gap_hours > 0:
+        try:
+            prev = datetime.fromisoformat(last_success)
+            if dt - prev < timedelta(hours=gap_hours):
+                return True, 'min-gap-not-met'
+        except Exception:
+            pass
     return False, 'ok'
 
 def resolve_target(cfg):
@@ -112,6 +111,36 @@ def resolve_target(cfg):
         return mode, repo, branch
     raise RuntimeError(f'Unknown target mode: {mode}')
 
+def append_daily(base_dir, dt, zone_label, slot_name, include_learning):
+    p = base_dir / f'daily/{dt:%Y-%m}.md'
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if not p.exists():
+        p.write_text(f'# Daily Logs {dt:%Y-%m}\n\n', encoding='utf-8')
+    content = p.read_text(encoding='utf-8')
+    date_key = f'{dt:%Y-%m-%d}'
+    if f'[{slot_name}] {date_key}' in content:
+        return False, 'duplicate-slot-entry', None
+    line = f'- [{slot_name}] {date_key} {dt:%H:%M} {zone_label} | {random.choice(PULSE_LINES)}\n'
+    if include_learning:
+        line += f'  - {random.choice(LEARN_LINES)}\n'
+    p.write_text(content + line, encoding='utf-8')
+    return True, 'written', str(p)
+
+def append_weekly(base_dir, dt):
+    week = dt.isocalendar().week
+    p = base_dir / f'weekly/{dt:%Y}-W{week:02d}.md'
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if p.exists():
+        return False, 'weekly-exists', None
+    text = f"# Weekly Digest {dt:%Y}-W{week:02d}\n\n- Focus: delivery consistency\n- Reliability: automation healthy\n- Next: improve quality signals\n"
+    p.write_text(text, encoding='utf-8')
+    return True, 'weekly-written', str(p)
+
+def write_health(base_dir, status):
+    p = base_dir / 'meta/status.json'
+    save_json(p, status)
+    return str(p)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--mode', default='pulse')
@@ -120,7 +149,10 @@ def main():
 
     cfg = load_config()
     status = load_status()
-    dt = now_tz(cfg.get('timezone', 'Asia/Jakarta'))
+    tz_name = cfg.get('timezone', 'Asia/Jakarta')
+    dt = now_tz(tz_name)
+    dt_utc = dt.astimezone(ZoneInfo('UTC'))
+    zone_label = dt.tzname() or tz_name
     force = str(args.force_run).lower() == 'true'
 
     mode, repo, branch = resolve_target(cfg)
@@ -129,51 +161,64 @@ def main():
         shutil.rmtree(RUNTIME_DIR)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    status['last_attempt'] = dt.isoformat()
+    slot_cfg = detect_slot_by_config(dt_utc, cfg['schedule']['slots'])
+    slot_name = slot_cfg['name']
+    jitter_min = int(slot_cfg.get('jitter_min', 0))
+
     summary = {
         'timestamp': dt.isoformat(),
-        'timezone': cfg.get('timezone', 'Asia/Jakarta'),
+        'timezone': tz_name,
+        'timezone_label': zone_label,
         'run_mode': args.mode,
         'target_mode': mode,
         'target_repo': repo,
         'target_branch': branch,
-        'slot': '',
+        'slot': slot_name,
+        'slot_base_utc': slot_cfg.get('base_utc', ''),
+        'jitter_min': jitter_min,
         'skipped': False,
         'skip_reason': '',
         'files_generated': [],
         'actions': []
     }
 
+    status['last_attempt'] = dt.isoformat()
     skip, reason = should_skip(cfg, status, dt, force)
     if skip:
         status['last_reason'] = reason
         summary['skipped'] = True
         summary['skip_reason'] = reason
         summary['actions'].append('guard-skip')
-        save_status(STATUS_PATH, status)
-        save_status(OUTPUT_DIR / 'meta/status.json', status)
-        save_summary(summary)
+        save_json(STATUS_PATH, status)
+        if cfg['modules'].get('health_report', True):
+            write_health(OUTPUT_DIR, status)
+        save_json(SUMMARY_PATH, summary)
         print(f'Skipped: {reason}')
         return
 
-    slot = detect_slot(dt.hour)
-    summary['slot'] = slot
-    random.seed(f"{dt:%Y-%m-%d}-{slot}")
-    jitter = random.randint(0, 20)
-    time.sleep(jitter)
-    summary['actions'].append(f'jitter-sleep-{jitter}s')
+    jitter_sec = random.randint(0, jitter_min * 60) if jitter_min > 0 else 0
+    if jitter_sec:
+        time.sleep(jitter_sec)
+    summary['actions'].append(f'jitter-sleep-{jitter_sec}s')
 
     changed = False
-    if args.mode in ('pulse', 'healthcheck') and cfg['modules'].get('pulse', True):
-        ok, why, path = append_daily_log(OUTPUT_DIR, dt, slot)
+
+    if cfg['modules'].get('pulse', True) and args.mode in ('pulse', 'healthcheck'):
+        ok, why, path = append_daily(
+            OUTPUT_DIR,
+            dt,
+            zone_label,
+            slot_name,
+            cfg['modules'].get('learning_note', True)
+        )
         changed = changed or ok
         status['last_reason'] = why
         summary['actions'].append('daily-pulse')
         if path:
             summary['files_generated'].append(path)
 
-    if args.mode in ('summary', 'pulse') and cfg['modules'].get('weekly_digest', True) and dt.weekday() == 6:
-        ok, why, path = append_weekly_digest(OUTPUT_DIR, dt)
+    if cfg['modules'].get('weekly_digest', True) and args.mode in ('summary', 'pulse') and dt.weekday() == 6:
+        ok, _, path = append_weekly(OUTPUT_DIR, dt)
         changed = changed or ok
         summary['actions'].append('weekly-digest')
         if path:
@@ -183,21 +228,25 @@ def main():
         status['today_count'] = int(status.get('today_count', 0)) + 1
         status['last_success'] = dt.isoformat()
         status['consecutive_failures'] = 0
-        status['last_slot'] = slot
+        status['last_slot'] = slot_name
         summary['actions'].append('content-generated')
     else:
-        status['last_reason'] = status.get('last_reason', 'no-change')
         summary['actions'].append('no-change')
+        status['last_reason'] = status.get('last_reason', 'no-change')
 
-    save_status(STATUS_PATH, status)
-    save_status(OUTPUT_DIR / 'meta/status.json', status)
-    save_summary(summary)
+    if cfg['modules'].get('health_report', True):
+        health_path = write_health(OUTPUT_DIR, status)
+        summary['files_generated'].append(str(health_path))
+        summary['actions'].append('health-report')
+
+    save_json(STATUS_PATH, status)
+    save_json(SUMMARY_PATH, summary)
 
     (RUNTIME_DIR / 'mode.txt').write_text(mode, encoding='utf-8')
     (RUNTIME_DIR / 'repo.txt').write_text(repo, encoding='utf-8')
     (RUNTIME_DIR / 'branch.txt').write_text(branch, encoding='utf-8')
     (RUNTIME_DIR / 'run_mode.txt').write_text(args.mode, encoding='utf-8')
-    (RUNTIME_DIR / 'slot.txt').write_text(slot, encoding='utf-8')
+    (RUNTIME_DIR / 'slot.txt').write_text(slot_name, encoding='utf-8')
 
     if mode == 'self':
         local_logs = Path('logs')
@@ -211,7 +260,7 @@ def main():
             else:
                 shutil.copy2(child, target)
 
-    print(f'Runner completed. mode={mode} repo={repo}')
+    print(f'Runner completed. mode={mode} repo={repo} slot={slot_name}')
 
 if __name__ == '__main__':
     main()
