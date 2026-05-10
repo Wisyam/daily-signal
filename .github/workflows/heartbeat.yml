@@ -35,8 +35,6 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       TARGET_REPO_TOKEN: ${{ secrets.TARGET_REPO_TOKEN }}
-      GITHUB_REPOSITORY_NAME: ${{ github.repository }}
-      GITHUB_ACTOR_NAME: ${{ github.actor }}
     steps:
       - uses: actions/checkout@v4
 
@@ -56,11 +54,6 @@ jobs:
       - name: Commit local changes (self mode)
         shell: bash
         run: |
-          if [ ! -d runtime_target ]; then
-            echo "No runtime_target found, skip local commit"
-            exit 0
-          fi
-          TARGET_REPO=$(cat runtime_target/repo.txt)
           TARGET_MODE=$(cat runtime_target/mode.txt)
           if [ "$TARGET_MODE" != "self" ]; then
             echo "Target mode is $TARGET_MODE, skip local commit"
@@ -73,16 +66,14 @@ jobs:
             echo "No local changes"
             exit 0
           fi
-          git commit -m "chore(signal): automated update"
+          SLOT=$(cat runtime_target/slot.txt)
+          MODE=$(cat runtime_target/run_mode.txt)
+          git commit -m "chore(signal): ${MODE} ${SLOT}"
           git push
 
       - name: Commit cross-repo changes (profile/custom)
         shell: bash
         run: |
-          if [ ! -d runtime_target ]; then
-            echo "No runtime_target found, skip cross-repo commit"
-            exit 0
-          fi
           TARGET_REPO=$(cat runtime_target/repo.txt)
           TARGET_MODE=$(cat runtime_target/mode.txt)
           TARGET_BRANCH=$(cat runtime_target/branch.txt)
@@ -91,8 +82,8 @@ jobs:
             exit 0
           fi
           if [ -z "$TARGET_REPO_TOKEN" ]; then
-            echo "TARGET_REPO_TOKEN missing for cross-repo mode"
-            exit 1
+            echo "TARGET_REPO_TOKEN missing; skip cross-repo safely"
+            exit 0
           fi
 
           rm -rf target_repo
