@@ -1,14 +1,18 @@
 import argparse
 import json
+import os
 import random
+import shutil
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import yaml
 
 CONFIG_PATH = Path('.daily-signal/config.yml')
 STATUS_PATH = Path('logs/meta/status.json')
+RUNTIME_DIR = Path('runtime_target')
+OUTPUT_DIR = RUNTIME_DIR / 'output'
 
 PULSE_LINES = [
     'Reviewed architecture trade-offs for maintainability.',
@@ -32,9 +36,9 @@ def load_status():
         return {"last_success":"","last_attempt":"","today_count":0,"last_slot":"","last_reason":"init","consecutive_failures":0}
     return json.loads(STATUS_PATH.read_text(encoding='utf-8'))
 
-def save_status(data):
-    STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    STATUS_PATH.write_text(json.dumps(data, indent=2), encoding='utf-8')
+def save_status(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding='utf-8')
 
 def now_tz(tz):
     return datetime.now(ZoneInfo(tz))
@@ -49,8 +53,8 @@ def detect_slot(hour):
         return 'afternoon'
     return 'night'
 
-def append_daily_log(dt, slot):
-    p = Path(f'logs/daily/{dt:%Y-%m}.md')
+def append_daily_log(base_dir, dt, slot):
+    p = base_dir / f'daily/{dt:%Y-%m}.md'
     p.parent.mkdir(parents=True, exist_ok=True)
     if not p.exists():
         p.write_text(f'# Daily Logs {dt:%Y-%m}\n\n', encoding='utf-8')
@@ -64,9 +68,9 @@ def append_daily_log(dt, slot):
     p.write_text(content + line, encoding='utf-8')
     return True, 'written'
 
-def append_weekly_digest(dt):
+def append_weekly_digest(base_dir, dt):
     week = dt.isocalendar().week
-    p = Path(f'logs/weekly/{dt:%Y}-W{week:02d}.md')
+    p = base_dir / f'weekly/{dt:%Y}-W{week:02d}.md'
     p.parent.mkdir(parents=True, exist_ok=True)
     if p.exists():
         return False, 'weekly-exists'
@@ -85,6 +89,29 @@ def should_skip(cfg, status, dt, force):
         return True, 'max-commits-reached'
     return False, 'ok'
 
+def resolve_target(cfg):
+    mode = cfg['target'].get('mode', 'self')
+    branch = cfg['target'].get('branch', 'main')
+    repo = cfg['target'].get('repo', '').strip()
+    current_repo = os.getenv('GITHUB_REPOSITORY_NAME', '').strip()
+    actor = os.getenv('GITHUB_ACTOR_NAME', '').strip()
+
+    if mode == 'self':
+        if not current_repo:
+            raise RuntimeError('Cannot resolve self repo from GITHUB_REPOSITORY_NAME')
+        return mode, current_repo, branch
+    if mode == 'profile':
+        if repo:
+            return mode, repo, branch
+        if not actor:
+            raise RuntimeError('Cannot resolve profile repo from GITHUB_ACTOR_NAME')
+        return mode, f'{actor}/{actor}', branch
+    if mode == 'custom':
+        if not repo:
+            raise RuntimeError('custom mode requires target.repo')
+        return mode, repo, branch
+    raise RuntimeError(f'Unknown target mode: {mode}')
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--mode', default='pulse')
@@ -94,31 +121,42 @@ def main():
     cfg = load_config()
     status = load_status()
     dt = now_tz(cfg.get('timezone', 'Asia/Jakarta'))
-
     force = str(args.force_run).lower() == 'true'
+
+    mode, repo, branch = resolve_target(cfg)
+
+    if RUNTIME_DIR.exists():
+        shutil.rmtree(RUNTIME_DIR)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    (RUNTIME_DIR / 'mode.txt').write_text(mode, encoding='utf-8')
+    (RUNTIME_DIR / 'repo.txt').write_text(repo, encoding='utf-8')
+    (RUNTIME_DIR / 'branch.txt').write_text(branch, encoding='utf-8')
+    (RUNTIME_DIR / 'run_mode.txt').write_text(args.mode, encoding='utf-8')
+
     status['last_attempt'] = dt.isoformat()
 
     skip, reason = should_skip(cfg, status, dt, force)
     if skip:
         status['last_reason'] = reason
-        save_status(status)
+        save_status(STATUS_PATH, status)
+        save_status(OUTPUT_DIR / 'meta/status.json', status)
         print(f'Skipped: {reason}')
         return
 
     slot = detect_slot(dt.hour)
+    (RUNTIME_DIR / 'slot.txt').write_text(slot, encoding='utf-8')
     random.seed(f"{dt:%Y-%m-%d}-{slot}")
-
-    # soft jitter 0-120 sec to diversify same-minute runs
-    time.sleep(random.randint(0, 120))
+    time.sleep(random.randint(0, 30))
 
     changed = False
     if args.mode in ('pulse', 'healthcheck') and cfg['modules'].get('pulse', True):
-        ok, why = append_daily_log(dt, slot)
+        ok, why = append_daily_log(OUTPUT_DIR, dt, slot)
         changed = changed or ok
         status['last_reason'] = why
 
     if args.mode in ('summary', 'pulse') and cfg['modules'].get('weekly_digest', True) and dt.weekday() == 6:
-        ok, why = append_weekly_digest(dt)
+        ok, _ = append_weekly_digest(OUTPUT_DIR, dt)
         changed = changed or ok
 
     if changed:
@@ -132,8 +170,22 @@ def main():
     else:
         status['last_reason'] = status.get('last_reason', 'no-change')
 
-    save_status(status)
-    print('Runner completed.')
+    save_status(STATUS_PATH, status)
+    save_status(OUTPUT_DIR / 'meta/status.json', status)
+
+    if mode == 'self':
+        local_logs = Path('logs')
+        local_logs.mkdir(parents=True, exist_ok=True)
+        for child in OUTPUT_DIR.iterdir():
+            target = local_logs / child.name
+            if child.is_dir():
+                if target.exists():
+                    shutil.rmtree(target)
+                shutil.copytree(child, target)
+            else:
+                shutil.copy2(child, target)
+
+    print(f'Runner completed. mode={mode} repo={repo}')
 
 if __name__ == '__main__':
     main()
