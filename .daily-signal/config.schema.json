@@ -1,9 +1,80 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["version", "timezone", "target", "schedule", "policy", "modules"],
+  "additionalProperties": false,
+  "required": ["version", "timezone", "target", "schedule", "policy", "modules", "notifications", "security"],
   "properties": {
-    "version": {"type": "integer"},
-    "timezone": {"type": "string"}
+    "version": {"type": "integer", "minimum": 1},
+    "timezone": {"type": "string", "minLength": 3},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "repo", "branch"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["self", "profile", "custom"]},
+        "repo": {"type": "string"},
+        "branch": {"type": "string", "minLength": 1}
+      }
+    },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slots"],
+      "properties": {
+        "slots": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "base_utc", "jitter_min"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "base_utc": {"type": "string", "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"},
+              "jitter_min": {"type": "integer", "minimum": 0, "maximum": 120}
+            }
+          }
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_commits_per_day", "min_gap_hours", "weekend_max_commits", "weekend_mode"],
+      "properties": {
+        "max_commits_per_day": {"type": "integer", "minimum": 1, "maximum": 10},
+        "min_gap_hours": {"type": "integer", "minimum": 0, "maximum": 24},
+        "weekend_max_commits": {"type": "integer", "minimum": 0, "maximum": 10},
+        "weekend_mode": {"type": "boolean"}
+      }
+    },
+    "modules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pulse", "learning_note", "weekly_digest", "health_report"],
+      "properties": {
+        "pulse": {"type": "boolean"},
+        "learning_note": {"type": "boolean"},
+        "weekly_digest": {"type": "boolean"},
+        "health_report": {"type": "boolean"}
+      }
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discord", "telegram"],
+      "properties": {
+        "discord": {"type": "string", "enum": ["optional", "required"]},
+        "telegram": {"type": "string", "enum": ["optional", "required"]}
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["require_cross_repo_token"],
+      "properties": {
+        "require_cross_repo_token": {"type": "boolean"}
+      }
+    }
   }
 }
