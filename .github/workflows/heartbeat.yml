@@ -120,34 +120,51 @@ jobs:
               summary = json.loads(p.read_text(encoding='utf-8'))
 
           status = os.getenv('JOB_STATUS', 'unknown')
+          icon = '✅' if status == 'success' else '❌'
+          color = 5763719 if status == 'success' else 15548997
+
           repo = os.getenv('GITHUB_REPOSITORY', '')
           run_id = os.getenv('GITHUB_RUN_ID', '')
+          run_no = os.getenv('GITHUB_RUN_NUMBER', '')
           run_url = f'https://github.com/{repo}/actions/runs/{run_id}'
 
+          schedule_text = (
+            "• Morning: 09:00 WIB (02:00 UTC)\n"
+            "• Afternoon: 14:00 WIB (07:00 UTC)\n"
+            "• Night: 21:00 WIB (14:00 UTC)"
+          )
+
+          actions = summary.get('actions', [])
+          actions_text = '\n'.join([f"• {a}" for a in actions[:10]]) if actions else '• -'
+
+          files = summary.get('files_generated', [])
+          files_text = '\n'.join([f"• `{f.replace('runtime_target/output/','logs/')}`" for f in files[:8]]) if files else '• -'
+
+          skipped = summary.get('skipped', False)
+          skip_reason = summary.get('skip_reason', '') or '-'
+
           fields = [
-            {"name":"Status","value":status,"inline":True},
-            {"name":"Repo","value":repo or '-',"inline":True},
-            {"name":"Run Mode","value":str(summary.get('run_mode','-')),"inline":True},
-            {"name":"Target Mode","value":str(summary.get('target_mode','-')),"inline":True},
-            {"name":"Target Repo","value":str(summary.get('target_repo','-')),"inline":True},
-            {"name":"Target Branch","value":str(summary.get('target_branch','-')),"inline":True},
-            {"name":"Slot","value":str(summary.get('slot','-')),"inline":True},
-            {"name":"Skipped","value":str(summary.get('skipped',False)),"inline":True},
-            {"name":"Skip Reason","value":str(summary.get('skip_reason','-') or '-'),"inline":False},
-            {"name":"Actions","value":"\n".join(summary.get('actions',[])[:20]) or '-',"inline":False},
-            {"name":"Files Generated","value":"\n".join(summary.get('files_generated',[])[:20]) or '-',"inline":False},
-            {"name":"Run URL","value":run_url,"inline":False}
+            {"name":"📌 Execution","value":f"{icon} **{status.upper()}**\nMode: `{summary.get('run_mode','-')}`\nSlot: `{summary.get('slot','-')}`\nSkipped: `{skipped}`", "inline":True},
+            {"name":"🎯 Target","value":f"Repo: `{summary.get('target_repo','-')}`\nBranch: `{summary.get('target_branch','-')}`\nMode: `{summary.get('target_mode','-')}`", "inline":True},
+            {"name":"🕒 Schedule Windows","value":schedule_text, "inline":False},
+            {"name":"🧠 Actions Performed","value":actions_text, "inline":False},
+            {"name":"📄 Generated Files","value":files_text, "inline":False},
+            {"name":"⚠️ Skip Reason","value":f"`{skip_reason}`", "inline":False},
+            {"name":"🔗 Run Details","value":f"[Open workflow run]({run_url})\nRun #: `{run_no}`", "inline":False}
           ]
 
-          color = 3066993 if status == 'success' else 15158332
           payload = {
+            "username": "Daily Signal Bot",
+            "avatar_url": "https://raw.githubusercontent.com/github/explore/main/topics/github-actions/github-actions.png",
             "embeds": [{
-              "title": "Daily Signal Report",
-              "description": "Automated heartbeat execution result",
+              "title": "Daily Signal — Execution Report",
+              "description": "Automated contribution heartbeat status and output summary.",
               "color": color,
-              "fields": fields
+              "fields": fields,
+              "footer": {"text": f"{repo} • daily-signal"}
             }]
           }
+
           Path('runtime_target/notify-discord.json').write_text(json.dumps(payload), encoding='utf-8')
           PY
         env:
